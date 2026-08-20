@@ -386,40 +386,38 @@ elif page == "\U0001F3C6 My Yahoo League":
                  "consumer_secret = \"...\"\n```")
         st.stop()
 
-    def _pkce_pair():
-        verifier = pysecrets.token_urlsafe(64)
-        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
-        return verifier, challenge
-
-    def _make_state(verifier):
+    def _make_state():
+        # Plain CSRF-protection state (nonce + HMAC signature) -- no PKCE.
+        # Yahoo's OAuth2 endpoint doesn't reliably support code_challenge/
+        # code_challenge_method, and since this is a confidential client
+        # (we already authenticate token exchange with the client secret),
+        # PKCE isn't needed on top of that.
         import hmac as _hmac
-        sig = _hmac.new(CONSUMER_SECRET.encode(), verifier.encode(), hashlib.sha256).hexdigest()[:16]
-        return base64.urlsafe_b64encode(f"{verifier}||{sig}".encode()).decode().rstrip("=")
+        nonce = pysecrets.token_urlsafe(24)
+        sig = _hmac.new(CONSUMER_SECRET.encode(), nonce.encode(), hashlib.sha256).hexdigest()[:16]
+        return base64.urlsafe_b64encode(f"{nonce}||{sig}".encode()).decode().rstrip("=")
 
-    def _decode_state(state):
+    def _state_is_valid(state):
         import hmac as _hmac
         try:
             padded = state + "=" * (-len(state) % 4)
-            verifier, sig = base64.urlsafe_b64decode(padded).decode().split("||", 1)
-            expected = _hmac.new(CONSUMER_SECRET.encode(), verifier.encode(), hashlib.sha256).hexdigest()[:16]
-            if _hmac.compare_digest(sig, expected):
-                return verifier
+            nonce, sig = base64.urlsafe_b64decode(padded).decode().split("||", 1)
+            expected = _hmac.new(CONSUMER_SECRET.encode(), nonce.encode(), hashlib.sha256).hexdigest()[:16]
+            return _hmac.compare_digest(sig, expected)
         except Exception:
-            pass
-        return None
+            return False
 
-    def _auth_url(state, challenge):
+    def _auth_url(state):
         params = {"client_id": CONSUMER_KEY, "redirect_uri": REDIRECT_URI, "response_type": "code",
-                  "scope": "fspt-r", "state": state, "code_challenge": challenge,
-                  "code_challenge_method": "S256"}
+                  "scope": "fspt-r", "state": state}
         return YAHOO_AUTH_URL + "?" + urllib.parse.urlencode(params)
 
-    def _exchange_code(code, verifier):
+    def _exchange_code(code):
         creds = base64.b64encode(f"{CONSUMER_KEY}:{CONSUMER_SECRET}".encode()).decode()
         r = requests.post(YAHOO_TOKEN_URL, headers={"Authorization": f"Basic {creds}",
                           "Content-Type": "application/x-www-form-urlencoded"},
                           data={"grant_type": "authorization_code", "code": code,
-                                "redirect_uri": REDIRECT_URI, "code_verifier": verifier}, timeout=15)
+                                "redirect_uri": REDIRECT_URI}, timeout=15)
         if r.status_code != 200:
             return {"error": f"Token exchange failed ({r.status_code}): {r.text[:400]}"}
         d = r.json()
@@ -464,10 +462,9 @@ elif page == "\U0001F3C6 My Yahoo League":
 
     qp = st.query_params
     if "code" in qp and st.session_state["yahoo_token"] is None:
-        verifier = _decode_state(qp.get("state", ""))
-        if verifier:
+        if _state_is_valid(qp.get("state", "")):
             with st.spinner("Exchanging authorization code..."):
-                tok = _exchange_code(qp["code"], verifier)
+                tok = _exchange_code(qp["code"])
             if "error" in tok:
                 st.error(f"OAuth error: {tok['error']}")
             else:
@@ -484,9 +481,8 @@ elif page == "\U0001F3C6 My Yahoo League":
     if st.session_state["yahoo_token"] is None:
         st.markdown("### Connect your Yahoo Fantasy account")
         if st.session_state.get("yahoo_auth_url") is None:
-            verifier, challenge = _pkce_pair()
-            state = _make_state(verifier)
-            st.session_state["yahoo_auth_url"] = _auth_url(state, challenge)
+            state = _make_state()
+            st.session_state["yahoo_auth_url"] = _auth_url(state)
         st.link_button("\U0001F517 Connect Yahoo Fantasy", st.session_state["yahoo_auth_url"], type="primary")
         st.caption("You'll be redirected to Yahoo, then brought back here automatically.")
 
