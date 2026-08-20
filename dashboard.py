@@ -365,7 +365,7 @@ elif page == "⚙️ Weight Dashboard":
                 subset=["rank_change"]), width="stretch", hide_index=True)
 
 # ═════════════════════════════════════════════════════════════
-#  PAGE: MY YAHOO LEAGUE  (OAuth2 PKCE flow for Streamlit Cloud)
+#  PAGE: MY YAHOO LEAGUE  (OAuth2 authorization-code flow for Streamlit Cloud)
 # ═════════════════════════════════════════════════════════════
 elif page == "\U0001F3C6 My Yahoo League":
     YAHOO_AUTH_URL = "https://api.login.yahoo.com/oauth2/request_auth"
